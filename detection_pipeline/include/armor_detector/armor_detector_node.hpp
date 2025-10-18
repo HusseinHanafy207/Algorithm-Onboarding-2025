@@ -14,6 +14,8 @@
 #include <opencv2/opencv.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <cv_bridge/cv_bridge.h>
+#include <cmath>
+#include <vector>
 
 // Constants
 #define HUE_RANGE_LIMIT 30.0
@@ -35,7 +37,7 @@ cv::Scalar upperHSV(10, 255, 255); // Upper bound of HSV
 cv::Scalar lowerHSV2(170, 120, 70);   // Lower bound of HSV
 cv::Scalar upperHSV2(179, 255, 255); // Upper bound of HSV
 
-class ArmorDetectorNode : /* TODO: Can you find the ROS node base class? We want our class to inherit from it. */ {
+class ArmorDetectorNode : public rclcpp::Node{
     public:
         ArmorDetectorNode();
     private:
