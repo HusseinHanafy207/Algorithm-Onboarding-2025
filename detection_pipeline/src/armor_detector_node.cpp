@@ -1,12 +1,16 @@
-/*
- *  READ ALL COMMENTS IN THIS FILE TO UNDERSTAND THE CODE THAT HAS BEEN WRITTEN FOR YOU
- *
- *  This file will create a subscriber node that reads images from the topic where camera_publisher_node publishes
- *  images. It will contain the functionality necessary for locating armor plates within a given image.
- *
- *  Since this file implements a ROS node like camera_publisher_node does, you may want to refer to that file to get
- *  ideas for things you need to consider while writing your code.
- */
+// 
+//  *  READ ALL COMMENTS IN THIS FILE TO UNDERSTAND THE CODE THAT HAS BEEN WRITTEN FOR YOU
+//  *
+//  *  This file will create a subscriber node that reads images from the topic where camera_publisher_node publishes
+//  *  images. It will contain the functionality necessary for locating armor plates within a given image.
+//  *
+//  *  Since this file implements a ROS node like camera_publisher_node does, you may want to refer to that file to get
+//  *  ideas for things you need to consider while writing your code.
+//  */
+
+
+
+
 
 #include "../include/armor_detector/armor_detector_node.hpp"
 #include <algorithm>
@@ -22,8 +26,13 @@ static inline float normalize_angle_deg(float a) {
 static inline float long_side_angle_deg(const cv::RotatedRect &r) {
     // OpenCV angle refers to the rectangle's width axis vs +x.
     // We want the angle of the LONG axis.
-    float a = normalize_angle_deg(r.angle);
-    if (r.size.width > r.size.height) a = normalize_angle_deg(a + 90.f);
+    float a = r.angle;
+    if (r.size.width < r.size.height) {
+        // Height is longer, so add 90 to get the long axis angle
+        a = normalize_angle_deg(a + 90.f);
+    } else {
+        a = normalize_angle_deg(a);
+    }
     return a; // [0,180)
 }
 
@@ -37,15 +46,9 @@ static inline float short_side(const cv::RotatedRect &r) {
 
 
 
-
-/*
- *  This is the constructor for our subscriber node. It initializes the node inherited from the base class and creates
- *  the subscription to the topic with messages from camera_publisher_node.
- */
 ArmorDetectorNode::ArmorDetectorNode() : rclcpp::Node("armor_detector_node"), frame_count(0)
 {
     const std::string topic = this->declare_parameter<std::string>("image_topic", "camera/image_raw");
-    // Subscribe to the camera publisher topic
     image_sub_ = this->create_subscription<sensor_msgs::msg::Image>(
         topic, rclcpp::QoS(10),
         std::bind(&ArmorDetectorNode::image_callback, this, std::placeholders::_1));
@@ -53,22 +56,12 @@ ArmorDetectorNode::ArmorDetectorNode() : rclcpp::Node("armor_detector_node"), fr
     RCLCPP_INFO(this->get_logger(), "ArmorDetectorNode subscribed to '%s'", topic.c_str());
 }
 
-/*
- *  This is an image callback method. It fetches messages (which are images in this case) from the topic this node
- *  subscribes to. The method will also run your armor detection algorithm on the image and show the result.
- *
- *  Callback methods are how we actually read data from a topic. Notice the parameter type and compare it to that of
- *  image_sub_. Our subscription here fetches images, and this method is how you actually operate on that image. Even
- *  though your image processing logic is in a different method, this callback uses those methods as helpers. Make sure
- *  that you understand how callbacks function in a ROS node architecture. If you completed the constructor correctly,
- *  you should know how a callback connects to a subscription in code.
- */
+
+
 void ArmorDetectorNode::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
 {
-    // Images are represented by cv::Mat objects. This will be useful when you write image processing logic.
     cv::Mat frame;
     
-    // Read the image from the topic into our frame with the proper color space (BGR8)
     try {
         frame = cv_bridge::toCvCopy(msg, "bgr8")->image;
     } catch (const cv_bridge::Exception &e) {
@@ -93,16 +86,14 @@ void ArmorDetectorNode::image_callback(const sensor_msgs::msg::Image::SharedPtr 
         std::cout << frame_count << "," << "no armor found" << std::endl;
     }
 
-    // Reduce the computational load and just show every 5th image
     if (frame_count % 5 == 0)
     {
         show_frame(frame);
     }
 }
 
-/*
- *  This method displays a frame to your screen.
- */
+
+
 void ArmorDetectorNode::show_frame(cv::Mat &frame)
 {
     std::vector<uchar> buf;
@@ -116,9 +107,8 @@ void ArmorDetectorNode::show_frame(cv::Mat &frame)
     }
 }
 
-/*
- *  The main method activates this subscriber node.
- */
+
+
 int main(int argc, char **argv)
 {
     rclcpp::init(argc, argv);
@@ -127,54 +117,68 @@ int main(int argc, char **argv)
     return 0;
 }
 
-/*
- *  This method will search a frame for armor plates and return the RotatedRect objects that correspond to the two light
- *  bars that exist on an armor plate.
- */
-std::vector<cv::RotatedRect> ArmorDetectorNode::search(cv::Mat& frame, cv::Scalar lowerHSV, cv::Scalar upperHSV, cv::Scalar lowerHSV2, cv::Scalar upperHSV2) {
-    // TODO: Complete the rest of the method. The onboarding instructions document will be very helpful.
 
+std::vector<cv::RotatedRect> ArmorDetectorNode::search(cv::Mat& frame, cv::Scalar lowerHSV, cv::Scalar upperHSV, 
+                                                        cv::Scalar lowerHSV2, cv::Scalar upperHSV2) {
     // 1) Image Preprocessing
     cv::Mat blurred, hsv;
-    cv::GaussianBlur(frame, blurred, cv::Size(5,5), 0);
-    cv::cvtColor(blurred, hsv, cv::COLOR_BGR2HSV);
+    cv::GaussianBlur(frame, blurred, cv::Size(9,9), 0); //remove noise
+    cv::cvtColor(blurred, hsv, cv::COLOR_BGR2HSV); // Convert to HSV color space
 
-    // 2) Color segmentation
+    // 2) Color segmentation - more aggressive for bright reds
     cv::Mat mask1, mask2, mask;
     cv::inRange(hsv, lowerHSV, upperHSV, mask1);
     cv::inRange(hsv, lowerHSV2, upperHSV2, mask2);
     cv::bitwise_or(mask1, mask2, mask);
 
-    // Clean up noise
-    cv::morphologyEx(mask, mask, cv::MORPH_OPEN, cv::getStructuringElement(cv::MORPH_RECT, {3,3}));
-    cv::morphologyEx(mask, mask, cv::MORPH_CLOSE, cv::getStructuringElement(cv::MORPH_RECT, {5,5}));
+    // Morphological operations - clean up noise but preserve shape
+    cv::Mat kernel_open = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3,3));
+    cv::Mat kernel_close = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3,5)); // Vertical bias
+    cv::morphologyEx(mask, mask, cv::MORPH_OPEN, kernel_open);
+    cv::morphologyEx(mask, mask, cv::MORPH_CLOSE, kernel_close);
 
-    // 2.5) Edge Detection
-    cv::Mat edges;
-    cv::Canny(mask, edges, 80, 160);
-
-
-    // 3) Contour Detection
+    // 2.5) Try finding contours directly from mask first, then edges if needed
     std::vector<std::vector<cv::Point>> contours;
-    cv::findContours(edges, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+    cv::findContours(mask.clone(), contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
 
+    // If we don't get enough contours, try edge-based approach
+    if (contours.size() < 2) {
+        cv::Mat edges;
+        cv::Canny(mask, edges, 50, 150);
+        cv::findContours(edges, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+    }
 
-    // 4) Contour Filtering
+    // 3) Contour Filtering - find valid light bars
     std::vector<cv::RotatedRect> light_bars;
     light_bars.reserve(contours.size());
+    
     for (const auto &c : contours) {
+        // Need at least 5 points for minAreaRect
         if (c.size() < 5) continue;
+        
+        // Check minimum area
+        double area = cv::contourArea(c);
+        if (area < 15.0) continue; // Filter tiny regions
+        
         cv::RotatedRect rr = cv::minAreaRect(c);
-        if (is_light_bar(rr)) light_bars.push_back(rr);
+        
+        // Additional sanity checks before is_light_bar
+        float long_len = long_side(rr);
+        float short_len = short_side(rr);
+        if (long_len < 5.0 || short_len < 1.0) continue;
+        
+        if (is_light_bar(rr)) {
+            light_bars.push_back(rr);
+        }
     }
+    
     if (light_bars.size() < 2) return {};
 
-
-    // 5) Pairing → choose best armor candidate
+    // 4) Pairing → choose best armor candidate
     std::vector<cv::RotatedRect> best_pair;
     double best_score = 1e9;
 
-    // sort by x for stable "left/right"
+    // Sort by x for stable left/right identification
     std::sort(light_bars.begin(), light_bars.end(),
               [](const cv::RotatedRect& a, const cv::RotatedRect& b){ return a.center.x < b.center.x; });
 
@@ -182,17 +186,24 @@ std::vector<cv::RotatedRect> ArmorDetectorNode::search(cv::Mat& frame, cv::Scala
         for (size_t j = i + 1; j < light_bars.size(); ++j) {
             auto L = light_bars[i];
             auto R = light_bars[j];
+            
             if (!is_armor(L, R)) continue;
 
-            // A simple score: favor parallel & aligned, with reasonable width/height
-            float angL = long_side_angle_deg(L), angR = long_side_angle_deg(R);
-            float dang = std::min(std::abs(angL-angR), 180.f-std::abs(angL-angR));
-            float ydiff = std::abs(L.center.y - R.center.y) / ((long_side(L)+long_side(R))/2.f);
+            // Improved scoring: favor parallel, aligned, and properly spaced bars
+            float angL = long_side_angle_deg(L);
+            float angR = long_side_angle_deg(R);
+            float dang = std::min(std::abs(angL - angR), 180.f - std::abs(angL - angR));
+            
+            float avg_height = (long_side(L) + long_side(R)) / 2.f;
+            float y_diff = std::abs(L.center.y - R.center.y);
+            float y_norm = y_diff / std::max(1.f, avg_height);
 
             float width = std::abs(R.center.x - L.center.x);
-            float plate_h = (long_side(L) + long_side(R)) / 2.f;
-            float ar = width / std::max(1.f, plate_h);
-            double score = dang + ydiff + std::abs(ar - 1.6f); // 1.6 ~ typical small-armor proportion
+            float armor_ar = width / std::max(1.f, avg_height);
+            
+            // Score function: lower is better
+            // Penalize: angle difference, y misalignment, deviation from ideal aspect ratio
+            double score = dang * 2.0 + y_norm * 10.0 + std::abs(armor_ar - 1.8f) * 5.0;
 
             if (score < best_score) {
                 best_score = score;
@@ -200,14 +211,12 @@ std::vector<cv::RotatedRect> ArmorDetectorNode::search(cv::Mat& frame, cv::Scala
             }
         }
     }
-    return (best_pair.size()==2) ? best_pair : std::vector<cv::RotatedRect>{};
-
+    
+    return (best_pair.size() == 2) ? best_pair : std::vector<cv::RotatedRect>{};
 }
 
-/*
- *  This method draws a rotated rectangle onto a frame. This is used to display the results of your algorithm when you
- *  run the node.
- */
+
+
 void ArmorDetectorNode::draw_rotated_rect(cv::Mat &frame, cv::RotatedRect &rect)
 {
     cv::Point2f vertices[4];
@@ -218,107 +227,83 @@ void ArmorDetectorNode::draw_rotated_rect(cv::Mat &frame, cv::RotatedRect &rect)
     }
 }
 
-/*
- *  This method determines whether a RotatedRect object can represent a light bar based on the constants defined in the
- *  header file. It checks dimensions, angles, and ratios against our configured thresholds to do so.
- */
 
- /*
- *  This method determines whether a RotatedRect object can represent a light bar based on the constants defined in the
- *  header file. It checks dimensions, angles, and ratios against our configured thresholds to do so.
- */
+
 bool ArmorDetectorNode::is_light_bar(cv::RotatedRect &rect)
 {
-    // Verify that the light bar width is valid
-    if (rect.size.width < LIGHT_BAR_WIDTH_LOWER_LIMIT)
-        return false;
+    float long_len = long_side(rect);
+    float short_len = short_side(rect);
     
-    // Verify that the light bar height is valid
-    if (rect.size.height < LIGHT_BAR_HEIGHT_LOWER_LIMIT)
-        return false;
+    // Verify minimum dimensions
+    if (short_len < LIGHT_BAR_WIDTH_LOWER_LIMIT) return false;
+    if (long_len < LIGHT_BAR_HEIGHT_LOWER_LIMIT) return false;
     
-    // Verify that the light bar angle is valid
-    // Light bars should be roughly vertical (around 90 degrees)
-    // We check if angle is between (90 - 30) and (90 + 30), i.e., 60 to 120 degrees
-    // OR between (-90 + 30) and 0, i.e., -60 to 0 degrees (for the other orientation)
-    if (!((rect.angle >= 90.0 - LIGHT_BAR_ANGLE_LIMIT && rect.angle <= 90.0 + LIGHT_BAR_ANGLE_LIMIT) ||
-          (rect.angle >= -LIGHT_BAR_ANGLE_LIMIT && rect.angle <= LIGHT_BAR_ANGLE_LIMIT) ||
-          (rect.angle >= 180.0 - LIGHT_BAR_ANGLE_LIMIT)))
-        return false;
+    // Verify aspect ratio (should be tall and thin)
+    float aspect_ratio = long_len / std::max(0.1f, short_len);
+    if (aspect_ratio < LIGHT_BAR_ASPECT_RATIO_LOWER_LIMIT) return false;
     
-    // Verify that the light bar aspect ratio is valid
-    // Aspect ratio is height / width, should be at least 2.0 (tall and thin)
-    float aspect_ratio = rect.size.height / rect.size.width;
-    if (aspect_ratio < LIGHT_BAR_ASPECT_RATIO_LOWER_LIMIT)
-        return false;
+    // Verify angle - light bars should be roughly vertical
+    // The long axis should point up/down, i.e., angle near 90° or 270° (which normalizes to 90°)
+    float long_angle = long_side_angle_deg(rect);
     
-    // All checks passed - this is a valid light bar
+    // Check if angle is close to 90° (vertical)
+    float angle_from_vertical = std::abs(long_angle - 90.f);
+    if (angle_from_vertical > 90.f) {
+        angle_from_vertical = 180.f - angle_from_vertical;
+    }
+    
+    if (angle_from_vertical > LIGHT_BAR_ANGLE_LIMIT) return false;
+    
     return true;
 }
 
 
-/*
- *  This method determines whether a pair of light bars (RotatedRect objects) can represent an armor plate based on the
- *  constants defined in the header file. It checks dimensions, angles, and ratios against our configured thresholds to
- *  do so.
- */
+
 bool ArmorDetectorNode::is_armor(cv::RotatedRect &left_rect, cv::RotatedRect &right_rect)
 {
-    // TODO: Use the ARMOR constants defined in the header file to complete this method.
-
-    // Verify that the light bars are roughly parallel by checking that their difference does not exceed the threshold
-    // Again, you will want to compare against both the limit and its supplement
-    // Ensure left/right are actually left/right
-    if (left_rect.center.x > right_rect.center.x) std::swap(left_rect, right_rect);
+    // Ensure left/right are correctly ordered
+    if (left_rect.center.x > right_rect.center.x) {
+        std::swap(left_rect, right_rect);
+    }
 
     float aL = long_side_angle_deg(left_rect);
     float aR = long_side_angle_deg(right_rect);
 
-    // Parallelism of bars
-    float diff = std::min(std::abs(aL-aR), 180.f-std::abs(aL-aR));
-    if (diff > ARMOR_ANGLE_DIFF_LIMIT) return false;
+    // 1) Parallelism check
+    float angle_diff = std::min(std::abs(aL - aR), 180.f - std::abs(aL - aR));
+    if (angle_diff > ARMOR_ANGLE_DIFF_LIMIT) return false;
 
-
-    // Verify that the ratio between the light bar aspect ratios (that's a mouthful) is within the threshold
-    // You will want to compare both left / right and right / left against the threshold
-    float arL = long_side(left_rect)  / std::max(1e-3f, short_side(left_rect));
+    // 2) Aspect ratio similarity
+    float arL = long_side(left_rect) / std::max(1e-3f, short_side(left_rect));
     float arR = long_side(right_rect) / std::max(1e-3f, short_side(right_rect));
-    float r1 = arL / std::max(1e-3f, arR);
-    float r2 = arR / std::max(1e-3f, arL);
-    if (r1 > ARMOR_LIGHT_BAR_ASPECT_RATIO_RATIO_LIMIT || r2 > ARMOR_LIGHT_BAR_ASPECT_RATIO_RATIO_LIMIT) return false;
+    float ar_ratio = std::max(arL, arR) / std::max(1e-3f, std::min(arL, arR));
+    if (ar_ratio > ARMOR_LIGHT_BAR_ASPECT_RATIO_RATIO_LIMIT) return false;
 
-    // Verify that the light bars are at roughly the same elevation (as in their y difference is within the threshold)
-    // The way the constant was determined assumes that you normalize this difference using the average light bar height
-    // What that means is that the expression you should be checking is abs(y_left - y_right) / avg_height
+    // 3) Y-alignment check
     float avg_h = (long_side(left_rect) + long_side(right_rect)) / 2.f;
     float y_norm = std::abs(left_rect.center.y - right_rect.center.y) / std::max(1e-3f, avg_h);
     if (y_norm > ARMOR_Y_DIFF_LIMIT) return false;
 
+    // 4) Height similarity
+    float hL = long_side(left_rect);
+    float hR = long_side(right_rect);
+    float h_ratio = std::max(hL, hR) / std::max(1e-3f, std::min(hL, hR));
+    if (h_ratio > ARMOR_HEIGHT_RATIO_LIMIT) return false;
 
-
-    // Verify that the ratio between light bar heights is within the threshold
-    // Again, you will want to compare both left / right and right / left
-    float hL = long_side(left_rect), hR = long_side(right_rect);
-    float hr1 = hL / std::max(1e-3f, hR);
-    float hr2 = hR / std::max(1e-3f, hL);
-    if (hr1 > ARMOR_HEIGHT_RATIO_LIMIT || hr2 > ARMOR_HEIGHT_RATIO_LIMIT) return false;
-
-    // Verify that the armor aspect ratio is within the threshold
-    // For some goofy reason, the constant for this step requires that you calculate aspect ratio as width / height
-    // There are multiple ways to define armor plate "height" and "width." Hopefully your idea is effective!
+    // 5) Armor plate aspect ratio
     float width = std::abs(right_rect.center.x - left_rect.center.x);
-    // include half bar widths to approximate total plate width between outer edges
+    // Add half the bar widths to get outer edge distance
     width += (short_side(left_rect) + short_side(right_rect)) * 0.5f;
     float armor_ar = width / std::max(1e-3f, avg_h);
-    if (armor_ar > ARMOR_ASPECT_RATIO_LIMIT) return false;
+    
+    // Armor should be wider than tall, but not too wide
+    if (armor_ar < 0.8f || armor_ar > ARMOR_ASPECT_RATIO_LIMIT) return false;
 
     return true;
 }
 
-/*
- *  This method represents a RotatedRect object as a point and returns it. It exists for debugging output while the node
- *  is being run.
- */
+
+
 std::vector<cv::Point2f> ArmorDetectorNode::rect_to_point(cv::RotatedRect &rect)
 {
     float rad = rect.angle < 90 ? rect.angle * M_PI / 180.f : (rect.angle - 180) * M_PI / 180.f;
@@ -326,7 +311,6 @@ std::vector<cv::Point2f> ArmorDetectorNode::rect_to_point(cv::RotatedRect &rect)
     float y_offset = rect.size.height * std::cos(rad) / 2.f;
 
     std::vector<cv::Point2f> points;
-    points = std::vector<cv::Point2f>();
     points.push_back(cv::Point2f(int(rect.center.x + x_offset), int(rect.center.y - y_offset)));
     points.push_back(cv::Point2f(int(rect.center.x - x_offset), int(rect.center.y + y_offset)));
     return points;
