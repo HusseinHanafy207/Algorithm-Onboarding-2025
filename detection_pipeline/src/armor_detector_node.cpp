@@ -256,34 +256,6 @@ bool ArmorDetectorNode::is_light_bar(cv::RotatedRect &rect)
     return true;
 }
 
-// bool ArmorDetectorNode::is_light_bar(cv::RotatedRect &rect)
-// {
-//     // TODO: Use the LIGHT_BAR constants defined in the header file to complete this method.
-//     // You may want to read the OpenCV documentation for RotatedRect
-
-//     // normalize dims so height is the long side
-//     float h = long_side(rect);
-//     float w = short_side(rect);
-
-//     // Verify that the light bar width is valid
-//     if (w < LIGHT_BAR_WIDTH_LOWER_LIMIT)  return false;
-
-//     // Verify that the light bar height is valid
-//     if (h < LIGHT_BAR_HEIGHT_LOWER_LIMIT) return false;
-
-//     // Verify that the light bar angle is valid
-//     // You will want to compare against both the limit and its supplement; think about the unit circle
-//     float a = long_side_angle_deg(rect);           // 0..180 (long axis)
-//     float d_to_vertical = std::abs(a - 90.f);      // distance from vertical
-//     if (d_to_vertical > LIGHT_BAR_ANGLE_LIMIT) return false;
-
-//     // Verify that the light bar aspect ratio is valid
-//     // Aspect ratio refers to height / width, not width / height
-//     float aspect = h / std::max(1e-3f, w);
-//     if (aspect < LIGHT_BAR_ASPECT_RATIO_LOWER_LIMIT) return false;
-
-//     return true;
-// }
 
 /*
  *  This method determines whether a pair of light bars (RotatedRect objects) can represent an armor plate based on the
